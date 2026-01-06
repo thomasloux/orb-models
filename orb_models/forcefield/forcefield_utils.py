@@ -482,15 +482,24 @@ def compute_forces_and_stress(
     compute_stress: bool = False,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
     """Compute forces and stress from energy using autograd."""
-    inputs = [positions, displacement]
-    grads = torch.autograd.grad(
-        outputs=[energy],  # (n_graphs,)
-        inputs=inputs,  # (n_nodes, 3)
-        grad_outputs=[torch.ones_like(energy)],
-        allow_unused=True,
-    )
-    forces = grads[0]
-    virials = grads[1]
+    if compute_stress:
+        inputs = [positions, displacement]
+        grads = torch.autograd.grad(
+            outputs=[energy],  # (n_graphs,)
+            inputs=inputs,  # (n_nodes, 3)
+            grad_outputs=[torch.ones_like(energy)],
+            allow_unused=True,
+        )
+        forces = grads[0]
+        virials = grads[1]
+    else:
+        forces = torch.autograd.grad(
+            outputs=[energy],  # (n_graphs,)
+            inputs=positions,  # (n_nodes, 3)
+            grad_outputs=[torch.ones_like(energy)],
+            allow_unused=True,
+        )[0]
+        virials = None
 
     if forces is None:
         raise ValueError(
