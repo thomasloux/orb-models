@@ -8,7 +8,7 @@ from orb_models.forcefield.forcefield_utils import (
     split_prediction,
     validate_regressor_inputs,
 )
-from orb_models.forcefield.forcefield_utils import compute_gradient_forces_and_stress
+from orb_models.forcefield.forcefield_utils import compute_forces_and_stress
 from orb_models.forcefield.load import load_forcefield_state_dict
 from orb_models.forcefield.pair_repulsion import ZBLBasis
 from orb_models.forcefield.nn_util import ScalarNormalizer
@@ -191,6 +191,68 @@ class ConservativeForcefieldRegressor(nn.Module):
         if self.has_stress:
             out[self.grad_stress_name] = preds[self.grad_stress_name]
         out[self.grad_rotation_name] = preds[self.grad_rotation_name]
+        for name in self.extra_properties:
+            head = self.heads[name]
+            if hasattr(head, "denormalize"):
+                out[name] = head.denormalize(preds[name], batch)
+            elif name == "confidence":
+                out[name] = torch.softmax(preds[name], dim=-1)
+            else:
+                raise ValueError(f"Expected normalizer or confidence head, got {name}.")
+
+        if split:
+            for name, pred in out.items():
+                out[name] = split_prediction(pred, batch.n_node)
+
+        return out  # type: ignore
+    def predict_inference(
+        self, batch: base.AtomGraphs, split: bool = False
+    ) -> Dict[str, torch.Tensor]:
+        """Predict energy, forces, and stress."""
+        vectors, stress_displacement, _ = (
+            batch.compute_differentiable_edge_vectors(
+                use_rotation=False,
+                use_stress_displacement=self.has_stress,
+            )
+        )
+        batch.system_features["stress_displacement"] = stress_displacement
+        batch.edge_features["vectors"] = vectors
+
+        # Get base model features
+        out = self.model.backbone_forward(batch)
+        node_features = out["node_features"]
+
+        energy_head = self.heads[self.energy_name]
+        base_energy = energy_head(node_features, batch)
+        raw_energy = energy_head.denormalize(base_energy, batch)
+        if self.pair_repulsion:
+            raw_energy += self.pair_repulsion_fn(batch)["energy"]
+        out[self.energy_name] = energy_head.normalize(raw_energy, batch, online=False)
+
+        forces, stress = compute_forces_and_stress(
+            energy=raw_energy,
+            positions=batch.node_features["positions"],
+            displacement=batch.system_features["stress_displacement"],
+            cell=batch.system_features["cell"],
+            compute_stress=self.has_stress,
+        )
+        out[self.grad_forces_name] = forces  # eV / A
+        if self.has_stress:
+            out[self.grad_stress_name] = stress  # eV / A^3
+
+        for name in self.extra_properties:
+            out[name] = self.heads[name](node_features, batch)
+        
+        preds = out
+
+        out = {}
+        out[self.energy_name] = self.heads[self.energy_name].denormalize(
+            preds[self.energy_name], batch
+        )
+        out[self.grad_forces_name] = preds[self.grad_forces_name]
+        if self.has_stress:
+            out[self.grad_stress_name] = preds[self.grad_stress_name]
+
         for name in self.extra_properties:
             head = self.heads[name]
             if hasattr(head, "denormalize"):

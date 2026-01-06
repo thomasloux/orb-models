@@ -514,6 +514,39 @@ class MoleculeGNS(nn.Module):
             "edge_features": edges,
             "pred": pred,
         }
+    
+    def backbone_forward(
+        self, batch: base.AtomGraphs
+    ) -> Dict[str, torch.Tensor]:
+        """Forward pass through the backbone GNS without decoder"""
+        # Featurize inputs
+        edge_features = self.featurize_edges(batch)
+        node_features = self.featurize_nodes(batch)
+        if self.conditioner is not None:
+            cond_nodes, cond_edges = self.conditioner(batch)
+        else:
+            cond_nodes, cond_edges = None, None
+
+        # Encode
+        nodes, edges = self._encoder(node_features, edge_features)
+
+        # Process through interaction networks
+        cutoff = get_cutoff(batch.edge_features["vectors"].norm(dim=-1))
+        for gnn in self.gnn_stacks:
+            nodes, edges = gnn(
+                nodes,
+                edges,
+                batch.senders,
+                batch.receivers,
+                cutoff,
+                cond_nodes=cond_nodes,
+                cond_edges=cond_edges,
+            )
+
+        return {
+            "node_features": nodes,
+            "edge_features": edges,
+        }
 
     def featurize_nodes(self, batch: base.AtomGraphs) -> torch.Tensor:
         """Featurize the nodes of a graph."""

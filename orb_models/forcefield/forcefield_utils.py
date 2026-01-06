@@ -474,6 +474,48 @@ def compute_gradient_forces_and_stress(
     voigt_stress = torch_full_3x3_to_voigt_6_stress(stress)
     return -1 * forces, voigt_stress, rotational_grad
 
+def compute_forces_and_stress(
+    energy: torch.Tensor,
+    positions: torch.Tensor,
+    displacement: torch.Tensor,
+    cell: torch.Tensor,
+    compute_stress: bool = False,
+) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    """Compute forces and stress from energy using autograd."""
+    inputs = [positions, displacement]
+    grads = torch.autograd.grad(
+        outputs=[energy],  # (n_graphs,)
+        inputs=inputs,  # (n_nodes, 3)
+        grad_outputs=[torch.ones_like(energy)],
+        allow_unused=True,
+    )
+    forces = grads[0]
+    virials = grads[1]
+
+    if forces is None:
+        raise ValueError(
+            "Forces are None. The computational graph between energy and "
+            "positions has been broken. Make sure the positions tensor has "
+            "not been replaced since calling compute_differentiable_edge_vectors()"
+        )
+    if virials is None and compute_stress:
+        raise ValueError(
+            "Virials are None. The computational graph between energy and "
+            "displacement has been broken. Make sure the displacement tensor has "
+            "not been replaced since calling compute_differentiable_edge_vectors()"
+        )
+
+    if compute_stress:
+        stress = torch.zeros_like(displacement)
+        cell = cell.view(-1, 3, 3)
+        volume = torch.linalg.det(cell).abs().unsqueeze(-1)
+        stress = virials / volume.view(-1, 1, 1)
+        stress = torch.where(torch.abs(stress) < 1e10, stress, torch.zeros_like(stress))
+        voigt_stress = torch_full_3x3_to_voigt_6_stress(stress)
+        return -1 * forces, voigt_stress
+    else:
+        return -1 * forces, None
+
 
 def torch_full_3x3_to_voigt_6_stress(stress_matrix: torch.Tensor) -> torch.Tensor:
     """Convert a batch of 3x3 stress tensors to a 6-component stress tensor in Voigt notation.
