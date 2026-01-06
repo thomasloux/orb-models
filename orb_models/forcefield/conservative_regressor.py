@@ -8,7 +8,7 @@ from orb_models.forcefield.forcefield_utils import (
     split_prediction,
     validate_regressor_inputs,
 )
-from orb_models.forcefield.forcefield_utils import compute_forces_and_stress
+from orb_models.forcefield.forcefield_utils import compute_forces_and_stress, compute_gradient_forces_and_stress
 from orb_models.forcefield.load import load_forcefield_state_dict
 from orb_models.forcefield.pair_repulsion import ZBLBasis
 from orb_models.forcefield.nn_util import ScalarNormalizer
