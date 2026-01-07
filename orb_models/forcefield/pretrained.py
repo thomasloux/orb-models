@@ -177,6 +177,7 @@ def orb_v3_conservative_architecture(
     activation: str = "silu",
     has_charge_spin_cond: bool = False,
     has_stress: bool = True,
+    has_confidence: bool = True,
     device: Optional[Union[torch.device, str]] = None,
     system_config: Optional[SystemConfig] = None,
 ) -> ConservativeForcefieldRegressor:
@@ -186,22 +187,25 @@ def orb_v3_conservative_architecture(
     else:
         conditioner = None
 
+    heads={
+        "energy": EnergyHead(
+            latent_dim=latent_dim,
+            num_mlp_layers=head_mlp_depth,
+            mlp_hidden_dim=head_mlp_hidden_dim,
+            predict_atom_avg=True,
+            activation=activation,
+        )
+    }
+    if has_confidence:
+        heads["confidence"] = ConfidenceHead(
+            latent_dim=latent_dim,
+            num_mlp_layers=head_mlp_depth,
+            mlp_hidden_dim=head_mlp_hidden_dim,
+            activation=activation,
+        )
+
     model = ConservativeForcefieldRegressor(
-        heads={
-            "energy": EnergyHead(
-                latent_dim=latent_dim,
-                num_mlp_layers=head_mlp_depth,
-                mlp_hidden_dim=head_mlp_hidden_dim,
-                predict_atom_avg=True,
-                activation=activation,
-            ),
-            "confidence": ConfidenceHead(
-                latent_dim=latent_dim,
-                num_mlp_layers=head_mlp_depth,
-                mlp_hidden_dim=head_mlp_hidden_dim,
-                activation=activation,
-            ),
-        },
+        heads=heads,
         model=MoleculeGNS(
             latent_dim=latent_dim,
             num_message_passing_steps=num_message_passing_steps,
@@ -395,6 +399,8 @@ def orb_v3_conservative_20_omat(
     device: Union[torch.device, str, None] = None,
     precision: str = "float32-high",
     compile: Optional[bool] = None,
+    has_stress: bool = True,
+    has_confidence: bool = True,
     train: bool = False,
 ) -> ConservativeForcefieldRegressor:
     """Load ORB v3 Conservative 20 max neighbors OMAT."""
@@ -405,7 +411,7 @@ def orb_v3_conservative_20_omat(
     ), "Cannot compile a conservative model in training mode."
 
     system_config = SystemConfig(radius=6.0, max_num_neighbors=20)
-    model = orb_v3_conservative_architecture(device=device, system_config=system_config)
+    model = orb_v3_conservative_architecture(device=device, system_config=system_config, has_stress=has_stress, has_confidence=has_confidence)
     model = load_model(
         model, weights_path, device, precision=precision, compile=compile, train=train
     )
